@@ -13,7 +13,7 @@ from dataset import logger
 from torch.nn.utils.rnn import PackedSequence
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
+#device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
 
 
 def create_optimizer(optimizer, params, **kwargs):
@@ -56,6 +56,7 @@ class PITrainer(object):
                  patience=1,
                  factor=0.5,
                  disturb_std=0.0):
+        self.device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
         self.nnet = nnet
         logger.info("Network structure:\n{}".format(self.nnet))
         self.optimizer = create_optimizer(
@@ -71,7 +72,7 @@ class PITrainer(object):
             patience=patience,
             min_lr=min_lr,
             verbose=True)
-        self.nnet.to(device)
+        self.nnet.to(self.device)
         self.checkpoint = checkpoint
         self.num_spks = nnet.num_spks
         self.clip_norm = clip_norm
@@ -90,7 +91,7 @@ class PITrainer(object):
         for input_sizes, nnet_input, source_attr, target_attr in dataset:
             num_batch += 1
             nnet_input = packed_sequence_cuda(nnet_input) if isinstance(
-                nnet_input, PackedSequence) else nnet_input.to(device)
+                nnet_input, PackedSequence) else nnet_input.to(self.device)
 
             self.optimizer.zero_grad()
 
@@ -120,7 +121,7 @@ class PITrainer(object):
             for input_sizes, nnet_input, source_attr, target_attr in dataset:
                 num_batch += 1
                 nnet_input = packed_sequence_cuda(nnet_input) if isinstance(
-                    nnet_input, PackedSequence) else nnet_input.to(device)
+                    nnet_input, PackedSequence) else nnet_input.to(self.device)
                 masks = self.nnet(nnet_input)
                 cur_loss = self.permutate_loss(masks, input_sizes, source_attr,
                                                target_attr)
@@ -166,9 +167,9 @@ class PITrainer(object):
                 "phase": [tensor...], only for psm
             }
         """
-        input_sizes = input_sizes.to(device)
-        mixture_spect = source_attr["spectrogram"].to(device)
-        targets_spect = [t.to(device) for t in target_attr["spectrogram"]]
+        input_sizes = input_sizes.to(self.device)
+        mixture_spect = source_attr["spectrogram"].to(self.device)
+        targets_spect = [t.to(self.device) for t in target_attr["spectrogram"]]
 
         if self.num_spks != len(targets_spect):
             raise ValueError(
@@ -177,8 +178,8 @@ class PITrainer(object):
 
         is_loss_with_psm = "phase" in source_attr
         if is_loss_with_psm:
-            mixture_phase = source_attr["phase"].to(device)
-            targets_phase = [t.to(device) for t in target_attr["phase"]]
+            mixture_phase = source_attr["phase"].to(self.device)
+            targets_phase = [t.to(self.device) for t in target_attr["phase"]]
 
         def loss(permute):
             loss_for_permute = []
