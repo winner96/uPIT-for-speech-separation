@@ -34,19 +34,19 @@ spectrogram_reader:
   apply_abs: true
 
 train_scp_conf:
-  mixture: "/content/uPIT-Speech-Separation/scp/tr_mx.scp"
-  spk1: "/content/uPIT-Speech-Separation/scp/tr_s1.scp"
-  spk2: "/content/uPIT-Speech-Separation/scp/tr_s2.scp"
+  mixture: "/content/uPIT-for-speech-separation/scp/tr_mx.scp"
+  spk1: "/content/uPIT-for-speech-separation/scp/tr_s1.scp"
+  spk2: "/content/uPIT-for-speech-separation/scp/tr_s2.scp"
 
 valid_scp_conf:
-  mixture: "/content/uPIT-Speech-Separation/scp/cv_mx.scp"
-  spk1: "/content/uPIT-Speech-Separation/scp/cv_s1.scp"
-  spk2: "/content/uPIT-Speech-Separation/scp/cv_s2.scp"
+  mixture: "/content/uPIT-for-speech-separation/scp/cv_mx.scp"
+  spk1: "/contuPIT-for-speech-separationparation/scp/cv_s1.scp"
+  spk2: "/contuPIT-for-speech-separationparation/scp/cv_s2.scp"
 
 debug_scp_conf:
-  mixture: "/content/uPIT-Speech-Separation/scp/tt_mx.scp"
-  spk1: "/content/uPIT-Speech-Separation/scp/tt_s1.scp"
-  spk2: "/content/uPIT-Speech-Separation/scp/tt_s2.scp"
+  mixture: "/content/uPIT-for-speech-separation/scp/tt_mx.scp"
+  spk1: "/content/uPIT-for-speech-separation/scp/tt_s1.scp"
+  spk2: "/content/uPIT-for-speech-separation/scp/tt_s2.scp"
 
 dataloader:
   shuffle: true
