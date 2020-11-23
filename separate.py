@@ -104,7 +104,7 @@ def run(args):
                 window=window,
                 center=True,
                 norm=norm,
-                fs=8000,
+                fs=16000,
                 nsamps=samps.size)
             if args.dump_mask:
                 sio.savemat(
