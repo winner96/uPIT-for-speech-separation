@@ -1,6 +1,6 @@
 ## DATASET
 used AVSpeech dataset(https://looking-to-listen.github.io/) extracted only 16kHz audio.
-maximum length of .wav is 10s
+maximum length of .wav is 10s(or 5s)
 
 ## Speech Separation with uPIT
 
