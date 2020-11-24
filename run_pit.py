@@ -5,11 +5,13 @@
 
 import argparse
 import os
+import torch as th
 
 from trainer import PITrainer
 from dataset import SpectrogramReader, Dataset, DataLoader
 from model import PITNet
 from utils import nfft, parse_yaml, get_logger
+
 
 logger = get_logger(__name__)
 
@@ -38,8 +40,9 @@ def train(args):
     reader_conf = config_dict["spectrogram_reader"]
     loader_conf = config_dict["dataloader"]
     dcnnet_conf = config_dict["model"]
+    state_dict = args.state_dict
 
-    location = None if args.cuda else "cpu"
+    location = "cpu" if args.cpu else None
 
     logger.info("Training with {}".format("IRM" if reader_conf["apply_abs"]
                                           else "PSM"))
@@ -75,7 +78,7 @@ def train(args):
             nnet.load_state_dict(th.load(state_dict, map_location=location))
 
     trainer = PITrainer(nnet, **config_dict["trainer"])
-    trainer.run(train_loader, valid_loader, num_epoches=args.num_epoches, start=start)
+    trainer.run(train_loader, valid_loader, num_epoches=args.num_epoches, start=args.start)
 
 
 if __name__ == '__main__':
@@ -116,5 +119,11 @@ if __name__ == '__main__':
         dest ="start",
         default=1,
         help="start index of training default 0 without --load")
+    parser.add_argument(
+        "--cpu",
+        default=False,
+        action="store_true",
+        dest="cpu",
+        help="If true, inference on CPUs")
     args = parser.parse_args()
     train(args)
