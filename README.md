@@ -1,3 +1,7 @@
+## DATASET
+used AVSpeech dataset(https://looking-to-listen.github.io/) extracted only 16kHz audio.
+maximum length of .wav is 10s
+
 ## Speech Separation with uPIT
 
 Speech separation with utterance-level PIT(Permutation Invariant Training)
@@ -8,7 +12,8 @@ see [requirements.txt](requirements.txt)
 
 ### Usage
 
-1. Generate dataset using [create-speaker-mixtures.zip](http://www.merl.com/demos/deep-clustering/create-speaker-mixtures.zip)
+1. If you have wsj0 dataset.
+Generate dataset using [create-speaker-mixtures.zip](http://www.merl.com/demos/deep-clustering/create-speaker-mixtures.zip)
 
 2. Prepare cmvn, .scp and configure experiments in .yaml files
 
