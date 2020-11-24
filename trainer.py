@@ -1,212 +1,129 @@
 #!/usr/bin/env python
 # coding=utf-8
+
 # wujian@2018
 
+import argparse
 import os
-import time
-
 import torch as th
-import torch.nn.functional as F
 
-from itertools import permutations
-from dataset import logger
-from torch.nn.utils.rnn import PackedSequence
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-
-#device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
+from trainer import PITrainer
+from dataset import SpectrogramReader, Dataset, DataLoader
+from model import PITNet
+from utils import nfft, parse_yaml, get_logger
 
 
-def create_optimizer(optimizer, params, **kwargs):
-    supported_optimizer = {
-        'sgd': th.optim.SGD,  # momentum, weight_decay, lr
-        'rmsprop': th.optim.RMSprop,  # momentum, weight_decay, lr
-        'adam': th.optim.Adam,  # weight_decay, lr
-        'adadelta': th.optim.Adadelta,  # weight_decay, lr
-        'adagrad': th.optim.Adagrad,  # lr, lr_decay, weight_decay
-        'adamax': th.optim.Adamax  # lr, weight_decay
-        # ...
-    }
-    if optimizer not in supported_optimizer:
-        raise ValueError('Now only support optimizer {}'.format(optimizer))
-    if optimizer != 'sgd' and optimizer != 'rmsprop':
-        del kwargs['momentum']
-    opt = supported_optimizer[optimizer](params, **kwargs)
-    logger.info('Create optimizer {}: {}'.format(optimizer, kwargs))
-    return opt
+logger = get_logger(__name__)
+
+def uttloader(scp_config, reader_kwargs, loader_kwargs, train=True):
+    mix_reader = SpectrogramReader(scp_config['mixture'], **reader_kwargs)
+    target_reader = [
+        SpectrogramReader(scp_config[spk_key], **reader_kwargs)
+        for spk_key in scp_config if spk_key[:3] == 'spk'
+    ]
+    dataset = Dataset(mix_reader, target_reader)
+    # modify shuffle status
+    loader_kwargs["shuffle"] = train
+    # validate perutt if needed
+    # if not train:
+    #     loader_kwargs["batch_size"] = 1
+    # if validate, do not shuffle
+    utt_loader = DataLoader(dataset, **loader_kwargs)
+    return utt_loader
 
 
-def packed_sequence_cuda(packed_sequence):
-    if not isinstance(packed_sequence, PackedSequence):
-        raise ValueError("Input parameter is not a instance of PackedSequence")
-    if th.cuda.is_available():
-        packed_sequence = packed_sequence.cuda()
-    return packed_sequence
+def train(args):
+    debug = args.debug
+    logger.info(
+        "Start training in {} model".format('debug' if debug else 'normal'))
+    num_bins, config_dict = parse_yaml(args.config)
+    reader_conf = config_dict["spectrogram_reader"]
+    loader_conf = config_dict["dataloader"]
+    dcnnet_conf = config_dict["model"]
+    state_dict = args.state_dict
 
+    location = "cpu" if args.cpu else None
 
-class PITrainer(object):
-    def __init__(self,
-                 nnet,
-                 checkpoint="checkpoint",
-                 optimizer="adam",
-                 lr=1e-5,
-                 momentum=0.9,
-                 weight_decay=0,
-                 clip_norm=None,
-                 min_lr=0,
-                 patience=1,
-                 factor=0.5,
-                 disturb_std=0.0):
-        self.device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
-        self.nnet = nnet
-        logger.info("Network structure:\n{}".format(self.nnet))
-        self.optimizer = create_optimizer(
-            optimizer,
-            self.nnet.parameters(),
-            lr=lr,
-            momentum=momentum,
-            weight_decay=weight_decay)
-        self.scheduler = ReduceLROnPlateau(
-            self.optimizer,
-            mode='min',
-            factor=factor,
-            patience=patience,
-            min_lr=min_lr,
-            verbose=True)
-        self.nnet.to(self.device)
-        self.checkpoint = checkpoint
-        self.num_spks = nnet.num_spks
-        self.clip_norm = clip_norm
-        self.disturb = disturb_std
-        if self.disturb:
-            logger.info("Disturb networks with std = {}".format(disturb_std))
-        if self.clip_norm:
-            logger.info("Clip gradient by 2-norm {}".format(clip_norm))
-        if not os.path.exists(checkpoint):
-            os.makedirs(checkpoint)
+    logger.info("Training with {}".format("IRM" if reader_conf["apply_abs"]
+                                          else "PSM"))
+    batch_size = loader_conf["batch_size"]
+    logger.info(
+        "Training in {}".format("per utterance" if batch_size == 1 else
+                                '{} utterance per batch'.format(batch_size)))
 
-    def train(self, dataset):
-        self.nnet.train()
-        logger.info("Training...")
-        tot_loss = num_batch = 0
-        for input_sizes, nnet_input, source_attr, target_attr in dataset:
-            num_batch += 1
-            nnet_input = packed_sequence_cuda(nnet_input) if isinstance(
-                nnet_input, PackedSequence) else nnet_input.to(self.device)
+    train_loader = uttloader(
+        config_dict["train_scp_conf"]
+        if not debug else config_dict["debug_scp_conf"],
+        reader_conf,
+        loader_conf,
+        train=True)
+    valid_loader = uttloader(
+        config_dict["valid_scp_conf"]
+        if not debug else config_dict["debug_scp_conf"],
+        reader_conf,
+        loader_conf,
+        train=False)
+    checkpoint = config_dict["trainer"]["checkpoint"]
+    logger.info("Training for {} epoches -> {}...".format(
+        args.num_epoches, "default checkpoint"
+        if checkpoint is None else checkpoint))
 
-            self.optimizer.zero_grad()
+    nnet = PITNet(num_bins, **dcnnet_conf)
 
-            if self.disturb:
-                self.nnet.disturb(self.disturb)
-
-            masks = self.nnet(nnet_input)
-            cur_loss = self.permutate_loss(masks, input_sizes, source_attr,
-                                           target_attr)
-            tot_loss += cur_loss.item()
-
-            cur_loss.backward()
-
-            if self.clip_norm:
-                th.nn.utils.clip_grad_norm_(self.nnet.parameters(),
-                                            self.clip_norm)
-            self.optimizer.step()
-
-        return tot_loss / num_batch, num_batch
-
-    def validate(self, dataset):
-        self.nnet.eval()
-        logger.info("Cross Validate...")
-        tot_loss = num_batch = 0
-        # do not need to keep gradient
-        with th.no_grad():
-            for input_sizes, nnet_input, source_attr, target_attr in dataset:
-                num_batch += 1
-                nnet_input = packed_sequence_cuda(nnet_input) if isinstance(
-                    nnet_input, PackedSequence) else nnet_input.to(self.device)
-                masks = self.nnet(nnet_input)
-                cur_loss = self.permutate_loss(masks, input_sizes, source_attr,
-                                               target_attr)
-                tot_loss += cur_loss.item()
-
-        return tot_loss / num_batch, num_batch
-
-    def run(self, train_set, dev_set, num_epoches=20, start =1):
-        init_loss, _ = self.validate(dev_set)
-        logger.info("Epoch {:2d}: dev = {:.4f}".format(0, init_loss))
-        if(start == 1):
-            th.save(self.nnet.state_dict(), os.path.join(self.checkpoint, 'epoch.0.pkl'))
+    if(state_dict != ""):
+        if not os.path.exists(state_dict):
+            raise ValueError("there is no path {}".format(state_dict))
         else:
-            logger.info("training from {}epoch".format(start))
+            logger.info("load {}".format(state_dict))
+            nnet.load_state_dict(th.load(state_dict, map_location=location))
 
-        for epoch in range(start, num_epoches + 1):
-            on_train_start = time.time()
-            train_loss, train_num_batch = self.train(train_set)
-            on_valid_start = time.time()
-            valid_loss, valid_num_batch = self.validate(dev_set)
-            on_valid_end = time.time()
-            # scheduler learning rate
-            self.scheduler.step(valid_loss)
-            logger.info(
-                "Loss(time/mini-batch) - Epoch {:2d}: train = {:.4f}({:.2f}s/{:d}) |"
-                " dev = {:.4f}({:.2f}s/{:d})".format(
-                    epoch, train_loss, on_valid_start - on_train_start,
-                    train_num_batch, valid_loss, on_valid_end - on_valid_start,
-                    valid_num_batch))
-            save_path = os.path.join(self.checkpoint,
-                                     'epoch.{:d}.pkl'.format(epoch))
-            th.save(self.nnet.state_dict(), save_path)
-        logger.info("Training for {} epoches done!".format(num_epoches))
+    trainer = PITrainer(nnet, **config_dict["trainer"])
+    trainer.run(train_loader, valid_loader, num_epoches=args.num_epoches, start=args.start)
 
-    def permutate_loss(self, masks, input_sizes, source_attr, target_attr):
-        """
-        Arguments:
-            masks: tensor list on device
-            input_sizes: 1D tensor on cpu
-            source_attr: python dict: {
-                "spectrogram": tensor,
-                "phase": tensor, only for psm
-            }
-            target_attr: python dict: {
-                "spectrogram": [tensor...],
-                "phase": [tensor...], only for psm
-            }
-        """
-        input_sizes = input_sizes.to(self.device)
-        mixture_spect = source_attr["spectrogram"].to(self.device)
-        targets_spect = [t.to(self.device) for t in target_attr["spectrogram"]]
 
-        if self.num_spks != len(targets_spect):
-            raise ValueError(
-                "Number targets do not match known speakers: {} vs {}".format(
-                    self.num_spks, len(targets_spect)))
-
-        is_loss_with_psm = "phase" in source_attr
-        if is_loss_with_psm:
-            mixture_phase = source_attr["phase"].to(self.device)
-            targets_phase = [t.to(self.device) for t in target_attr["phase"]]
-
-        def loss(permute):
-            loss_for_permute = []
-            for s, t in enumerate(permute):
-                # refer_spect = targets_spect[t] * th.cos(
-                #     mixture_phase -
-                #     targets_phase[t]) if is_loss_with_psm else targets_spect[t]
-                # TODO: using non-negative psm(add ReLU)?
-                refer_spect = targets_spect[t] * F.relu(
-                    th.cos(mixture_phase - targets_phase[t])
-                ) if is_loss_with_psm else targets_spect[t]
-                # N x T x F => N x 1
-                utt_loss = th.sum(
-                    th.sum(
-                        th.pow(masks[s] * mixture_spect - refer_spect, 2), -1),
-                    -1)
-                loss_for_permute.append(utt_loss)
-            loss_perutt = sum(loss_for_permute) / input_sizes
-            return loss_perutt
-
-        num_utts = input_sizes.shape[0]
-        # O(N!), could be optimized
-        # P x N
-        pscore = th.stack(
-            [loss(p) for p in permutations(range(self.num_spks))])
-        min_perutt, _ = th.min(pscore, dim=0)
-        return th.sum(min_perutt) / (self.num_spks * num_utts)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description="Command to start PIT training, configured by .yaml files")
+    parser.add_argument(
+        "--flags",
+        type=str,
+        default="",
+        help="This option is used to show what this command is runing for")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="train.yaml",
+        dest="config",
+        help="Location of .yaml configure files for training")
+    parser.add_argument(
+        "--debug",
+        default=False,
+        action="store_true",
+        dest="debug",
+        help="If true, start training in debug data")
+    parser.add_argument(
+        "--num-epoches",
+        type=int,
+        default=20,
+        dest="num_epoches",
+        help="Number of epoches to train")
+    parser.add_argument(
+        "--load",
+        type=str,
+        dest ="state_dict",
+        default="",
+        help="Location of networks state file")
+    parser.add_argument(
+        "--start",
+        type=int,
+        dest ="start",
+        default=1,
+        help="start index of training default 0 without --load")
+    parser.add_argument(
+        "--cpu",
+        default=False,
+        action="store_true",
+        dest="cpu",
+        help="If true, inference on CPUs")
+    args = parser.parse_args()
+    train(args)
