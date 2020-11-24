@@ -2,11 +2,12 @@
 trainer:
   checkpoint: "/content/drive/MyDrive/checkpoint/2spk_pit_psm_c"
   optimizer: "adam"
-  lr: 1.0e-4
+  #lr: 1.0e-4
+  lr: 4.0e-6
   momentum: 0.9
   weight_decay: 0
   clip_norm: 200
-  min_lr: 1.0e-8
+  min_lr: 1.0e-10
   patience: 0
   factor: 0.7
 
