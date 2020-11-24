@@ -129,12 +129,15 @@ class PITrainer(object):
 
         return tot_loss / num_batch, num_batch
 
-    def run(self, train_set, dev_set, num_epoches=20):
+    def run(self, train_set, dev_set, num_epoches=20, start =1):
         init_loss, _ = self.validate(dev_set)
         logger.info("Epoch {:2d}: dev = {:.4f}".format(0, init_loss))
-        th.save(self.nnet.state_dict(),
-                os.path.join(self.checkpoint, 'epoch.0.pkl'))
-        for epoch in range(1, num_epoches + 1):
+        if(start == 1):
+            th.save(self.nnet.state_dict(), os.path.join(self.checkpoint, 'epoch.0.pkl'))
+        else:
+            logger.info("training from {}epoch".format(start))
+
+        for epoch in range(start, num_epoches + 1):
             on_train_start = time.time()
             train_loss, train_num_batch = self.train(train_set)
             on_valid_start = time.time()
