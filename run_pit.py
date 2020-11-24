@@ -39,6 +39,8 @@ def train(args):
     loader_conf = config_dict["dataloader"]
     dcnnet_conf = config_dict["model"]
 
+    location = None if args.cuda else "cpu"
+
     logger.info("Training with {}".format("IRM" if reader_conf["apply_abs"]
                                           else "PSM"))
     batch_size = loader_conf["batch_size"]
@@ -64,8 +66,16 @@ def train(args):
         if checkpoint is None else checkpoint))
 
     nnet = PITNet(num_bins, **dcnnet_conf)
+
+    if(state_dict != ""):
+        if not os.path.exists(state_dict):
+            raise ValueError("there is no path {}".format(state_dict))
+        else:
+            logger.info("load {}".format(state_dict))
+            nnet.load_state_dict(th.load(state_dict, map_location=location))
+
     trainer = PITrainer(nnet, **config_dict["trainer"])
-    trainer.run(train_loader, valid_loader, num_epoches=args.num_epoches)
+    trainer.run(train_loader, valid_loader, num_epoches=args.num_epoches, start=start)
 
 
 if __name__ == '__main__':
@@ -94,5 +104,17 @@ if __name__ == '__main__':
         default=20,
         dest="num_epoches",
         help="Number of epoches to train")
+    parser.add_argument(
+        "--load",
+        type=str,
+        dest ="state_dict",
+        default="",
+        help="Location of networks state file")
+    parser.add_argument(
+        "--start",
+        type=int,
+        dest ="start",
+        default=1,
+        help="start index of training default 0 without --load")
     args = parser.parse_args()
     train(args)
