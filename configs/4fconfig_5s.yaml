@@ -4,7 +4,9 @@ trainer:
   optimizer: "adam"
   #lr: 1.0e-4
   #from epoch 15
-  lr: 4.9e-5
+  #lr: 4.9e-5 
+  #from epoch 25
+  lr: 1.7e-05
   momentum: 0.9
   weight_decay: 0
   clip_norm: 200
